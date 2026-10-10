@@ -307,7 +307,7 @@ export function Calculator() {
                       Calculating...
                     </>
                   ) : (
-                    "Calculate My Future"
+                    "Calculate Projection"
                   )}
                 </Button>
               </form>
@@ -341,7 +341,7 @@ export function Calculator() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-6 w-6" />
-                Your Retirement Projection
+                Illustrative Retirement Projection
               </CardTitle>
               <CardDescription>
                 At age {form.getValues("retirementAge")}, your savings could be worth:
@@ -370,12 +370,17 @@ export function Calculator() {
                         <p className="text-xl font-semibold">{formatCurrency(result.totalContributions)}</p>
                       </div>
                       <div className="rounded-lg border bg-background/50 p-4">
-                        <p className="text-sm text-muted-foreground">Total Interest Earned</p>
+                        <p className="text-sm text-muted-foreground">Estimated Investment Growth</p>
                         <p className="text-xl font-semibold text-primary">{formatCurrency(result.totalInterest)}</p>
                       </div>
                     </div>
                   </>
                 )}
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                <span className="font-semibold text-foreground">Educational use only.</span>{" "}
+                This is a hypothetical estimate, not financial, investment, tax, or legal advice.
+                Actual results may differ.
+              </p>
               <Separator />
                <div>
                 <h4 className="font-semibold text-lg mb-2">Contribution Breakdown</h4>
@@ -386,6 +391,23 @@ export function Calculator() {
                   <ContributionChart data={result.breakdown} isCapped={isProjectedValueTooHigh} />
                 </div>
                </div>
+               <section aria-labelledby="projection-assumptions-heading" className="rounded-lg border bg-muted/30 p-4 text-sm">
+                <h4 id="projection-assumptions-heading" className="font-semibold">
+                  Assumptions and limitations
+                </h4>
+                <p className="mt-2 leading-relaxed text-muted-foreground">
+                  The calculator assumes the same annual return every year. It adds each
+                  annual contribution before that year&apos;s growth and increases future
+                  contributions according to your inputs. All amounts are nominal,
+                  meaning they are not adjusted for inflation.
+                </p>
+                <p className="mt-2 leading-relaxed text-muted-foreground">
+                  These projections do not account for taxes, fees, market volatility,
+                  contribution limits, withdrawals, or your full financial situation.
+                  Returns are not guaranteed, and actual results will vary. Consider
+                  consulting a qualified professional before making financial decisions.
+                </p>
+               </section>
             </CardContent>
           </Card>
         )}
