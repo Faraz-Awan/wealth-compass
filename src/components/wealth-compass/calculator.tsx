@@ -2,412 +2,264 @@
 
 import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { z } from "zod";
-import {
-  Calculator as CalculatorIcon,
-  Loader2,
-  TrendingUp,
-  Wallet,
-  Calendar,
-  AreaChart,
-  Percent,
-  AlertTriangle,
-} from "lucide-react";
-
+import { useForm, type UseFormReturn } from "react-hook-form";
+import { AreaChart, Calculator as CalculatorIcon, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { ContributionChart } from "./contribution-chart";
-import { formatCurrency } from "@/lib/utils";
-import { Separator } from "../ui/separator";
-import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
-import { calculateRetirementSavings, MAX_PROJECTION } from "@/lib/retirement-calculator";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
+import { calculatorSchema, type FormValues } from "@/lib/calculator-schema";
+import {
+  calculateRetirementSavings,
+  projectionInTodaysDollars,
+  realAnnualReturn,
+  RETURN_SCENARIOS,
+  MAX_PROJECTION,
+  type CalculationResult,
+} from "@/lib/retirement-calculator";
 
+type NumericField = "currentAge" | "retirementAge" | "currentSavings" | "annualContribution" | "returnRate" | "inflationRate" | "increaseValue";
 
-const formSchema = z
-  .object({
-    currentAge: z.coerce
-      .number({ required_error: "Current age is required." })
-      .min(18, "Must be at least 18")
-      .max(99, "Must be less than 100"),
-    retirementAge: z.coerce
-      .number({ required_error: "Retirement age is required." })
-      .min(19, "Must be older than current age")
-      .max(100, "Must be 100 or less"),
-    currentSavings: z.coerce
-      .number({ required_error: "Enter your current savings." })
-      .min(0, "Cannot be negative")
-      .max(100000000, "Must be less than 100,000,000"),
-    annualContribution: z.coerce
-      .number({ required_error: "Enter your annual contribution." })
-      .min(0, "Cannot be negative")
-      .max(1000000, "Must be less than 1,000,000"),
-    increaseType: z.enum(["percent", "amount"]).default("percent"),
-    increaseValue: z.coerce.number().min(0, "Cannot be negative").default(0),
-    returnRate: z.coerce
-      .number({ required_error: "Enter an expected return rate." })
-      .min(0, "Must be 0 or greater")
-      .max(20, "Must be 20 or less"),
-  })
-  .refine((data) => data.retirementAge > data.currentAge, {
-    message: "Retirement age must be after current age.",
-    path: ["retirementAge"],
-  })
-  .refine((data) => {
-    if (data.increaseType === 'percent') {
-        return data.increaseValue <= 50;
-    }
-    return true;
-  }, {
-    message: "Increase cannot be more than 50%.",
-    path: ["increaseValue"],
-  })
-  .refine((data) => {
-    if (data.increaseType === 'amount') {
-        return data.increaseValue <= data.annualContribution;
-    }
-    return true;
-  }, {
-    message: "Increase cannot be more than the initial annual contribution.",
-    path: ["increaseValue"],
-  });
+function NumberField({ form, name, label, step = "any", onChange }: {
+  form: UseFormReturn<FormValues>;
+  name: NumericField;
+  label: string;
+  step?: string;
+  onChange?: () => void;
+}) {
+  return (
+    <FormField control={form.control} name={name} render={({ field }) => (
+      <FormItem>
+        <FormLabel>{label}</FormLabel>
+        <FormControl><Input type="number" step={step} required {...field} onChange={event => { field.onChange(event); onChange?.(); }} /></FormControl>
+        <FormMessage />
+      </FormItem>
+    )} />
+  );
+}
 
-
-export type FormValues = z.infer<typeof formSchema>;
-
-export type BreakdownItem = {
-  name: string;
-  value: number;
-  percentage: number;
-  age: number;
-  contribution: number;
-};
-
-export type CalculationResult = {
-  totalProjectedValue: number;
-  totalContributions: number;
-  totalInterest: number;
-  breakdown: BreakdownItem[];
-};
+function projectedAmount(projection: CalculationResult) {
+  return projection.isCapped ? `Over ${formatCurrency(MAX_PROJECTION)}` : formatCurrency(projection.totalProjectedValue);
+}
 
 export function Calculator() {
-  const [result, setResult] = useState<CalculationResult | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isProjectedValueTooHigh, setIsProjectedValueTooHigh] = useState(false);
-
+  const [advanced, setAdvanced] = useState(false);
+  const [customReturn, setCustomReturn] = useState(false);
+  const [todayDollars, setTodayDollars] = useState(false);
+  const [snapshot, setSnapshot] = useState<{ inputs: FormValues; projection: CalculationResult } | null>(null);
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(calculatorSchema),
+    shouldUnregister: false,
     defaultValues: {
       currentAge: 30,
       retirementAge: 65,
       currentSavings: 50000,
       annualContribution: 10000,
+      returnRate: 7,
+      inflationRate: 3,
       increaseType: "percent",
       increaseValue: 0,
-      returnRate: 7,
+      contributionTiming: "start",
     },
   });
+  const currentInputs = form.watch();
+  const currentValidation = calculatorSchema.safeParse(currentInputs);
+  const inputsChanged = snapshot && (!currentValidation.success || JSON.stringify(currentValidation.data) !== JSON.stringify(snapshot.inputs));
+  const result = snapshot && (todayDollars
+    ? projectionInTodaysDollars(snapshot.projection, snapshot.inputs)
+    : snapshot.projection);
+  const comparison = snapshot ? [
+    ...RETURN_SCENARIOS,
+    ...(!RETURN_SCENARIOS.some(scenario => scenario.rate === snapshot.inputs.returnRate)
+      ? [{ label: "Custom", rate: snapshot.inputs.returnRate }]
+      : []),
+  ].map(scenario => {
+    const inputs = { ...snapshot.inputs, returnRate: scenario.rate };
+    const nominal = calculateRetirementSavings(inputs);
+    return { ...scenario, projection: todayDollars ? projectionInTodaysDollars(nominal, inputs) : nominal };
+  }) : [];
 
-  function onSubmit(values: FormValues) {
-    setIsLoading(true);
-    setResult(null);
-    setIsProjectedValueTooHigh(false);
-
-    setTimeout(() => {
-      const calculation = calculateRetirementSavings(values);
-
-      if (calculation.totalProjectedValue >= MAX_PROJECTION) {
-        setIsProjectedValueTooHigh(true);
-        setResult(calculation);
-      } else {
-        setResult(calculation);
-      }
-
-      setIsLoading(false);
-    }, 1000);
+  function onSubmit(inputs: FormValues) {
+    setSnapshot({ inputs, projection: calculateRetirementSavings(inputs) });
   }
 
-  const increaseType = form.watch("increaseType");
-
   return (
-    <div className="grid w-full gap-8 lg:grid-cols-5">
-      <div className="flex flex-col gap-8 lg:col-span-2">
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalculatorIcon className="h-6 w-6" />
-              Your Financial Details
-            </CardTitle>
-            <CardDescription>
-              Enter your information to project your retirement savings.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <FormField
-                    control={form.control}
-                    name="currentAge"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Current Age</FormLabel>
-                        <FormControl>
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input type="number" placeholder="30" {...field} className="pl-9" />
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="retirementAge"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Retirement Age</FormLabel>
-                         <FormControl>
-                          <div className="relative">
-                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input type="number" placeholder="65" {...field} className="pl-9" />
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-                 <FormField
-                  control={form.control}
-                  name="currentSavings"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Current Savings</FormLabel>
-                       <FormControl>
-                          <div className="relative">
-                            <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input type="number" placeholder="50000" {...field} className="pl-9" />
-                          </div>
-                        </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                 <FormField
-                  control={form.control}
-                  name="annualContribution"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Annual Contribution</FormLabel>
-                      <FormControl>
-                          <div className="relative">
-                            <Wallet className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input type="number" placeholder="10000" {...field} className="pl-9" />
-                          </div>
-                        </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="increaseValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Annual Contribution Increase</FormLabel>
-                      <FormDescription className="pb-2">
-                        Increase your contribution each year by a set amount or percentage.
-                      </FormDescription>
-                       <div className="relative">
-                          <FormControl>
-                             <Input type="number" placeholder="0" {...field} step="0.1" className={cn(increaseType === 'percent' ? "pr-24" : "pr-20")} />
-                          </FormControl>
-                          <div className="absolute inset-y-0 right-0 flex items-center pr-1.5">
-                             <FormField
-                              control={form.control}
-                              name="increaseType"
-                              render={({ field: radioField }) => (
-                                <RadioGroup
-                                  onValueChange={radioField.onChange}
-                                  defaultValue={radioField.value}
-                                  className="flex items-center rounded-md bg-muted p-1"
-                                >
-                                  <FormItem>
-                                    <FormControl>
-                                      <RadioGroupItem value="percent" id="r1" className="sr-only"/>
-                                    </FormControl>
-                                    <FormLabel htmlFor="r1" className={cn("flex h-full cursor-pointer items-center justify-center rounded-md px-2.5 py-1 text-xs font-medium", form.watch('increaseType') === 'percent' ? 'bg-background shadow' : '')}>
-                                      %
-                                    </FormLabel>
-                                  </FormItem>
-                                  <FormItem>
-                                    <FormControl>
-                                      <RadioGroupItem value="amount" id="r2" className="sr-only"/>
-                                    </FormControl>
-                                     <FormLabel htmlFor="r2" className={cn("flex h-full cursor-pointer items-center justify-center rounded-md px-2.5 py-1 text-xs font-medium", form.watch('increaseType') === 'amount' ? 'bg-background shadow' : '')}>
-                                      $
-                                    </FormLabel>
-                                  </FormItem>
-                                </RadioGroup>
-                              )}
-                            />
-                          </div>
-                       </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                 <FormField
-                  control={form.control}
-                  name="returnRate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Avg. Annual Return Rate (%)</FormLabel>
-                      <FormControl>
-                          <div className="relative">
-                            <Percent className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input type="number" placeholder="7" {...field} step="0.1" className="pl-9" />
-                          </div>
-                        </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <Button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full bg-accent text-accent-foreground shadow-md transition-all hover:bg-accent/90 hover:shadow-lg"
-                  size="lg"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Calculating...
-                    </>
-                  ) : (
-                    "Calculate Projection"
-                  )}
-                </Button>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="flex flex-col gap-8 lg:col-span-3">
-        {isLoading && (
-          <div className="flex h-[600px] w-full items-center justify-center rounded-lg border border-dashed bg-card shadow-sm">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-12 w-12 animate-spin text-primary" />
-              <p className="text-muted-foreground">Compounding your returns...</p>
-            </div>
+    <div className="grid w-full items-start gap-8 lg:grid-cols-5">
+      <Card className="shadow-lg lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><CalculatorIcon className="h-6 w-6" />Your financial details</CardTitle>
+          <CardDescription>Start with a few assumptions and explore what changes.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div role="group" aria-label="Calculator mode" className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+            {[false, true].map(isAdvanced => (
+              <Button key={String(isAdvanced)} type="button" variant={advanced === isAdvanced ? "secondary" : "ghost"}
+                aria-pressed={advanced === isAdvanced} onClick={() => setAdvanced(isAdvanced)}>
+                {isAdvanced ? "Advanced" : "Basic"}
+              </Button>
+            ))}
           </div>
-        )}
-        {!isLoading && !result && (
-           <div className="flex h-[600px] w-full flex-col items-center justify-center rounded-lg border border-dashed bg-card shadow-sm">
-            <div className="flex flex-col items-center gap-4 text-center">
-              <div className="rounded-full border bg-background p-4">
-                 <AreaChart className="h-12 w-12 text-muted-foreground" />
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit, () => setAdvanced(true))} className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <NumberField form={form} name="currentAge" label="Current age" step="1" />
+                <NumberField form={form} name="retirementAge" label="Retirement age" step="1" />
               </div>
-              <h3 className="text-xl font-semibold">Your Future Awaits</h3>
-              <p className="text-muted-foreground">Fill out the form to see your retirement projection.</p>
-            </div>
+              <NumberField form={form} name="currentSavings" label="Current savings ($)" />
+              <NumberField form={form} name="annualContribution" label="Annual contribution ($)" />
+
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-medium">Assumed annual return</legend>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {RETURN_SCENARIOS.map(scenario => (
+                    <Button key={scenario.rate} type="button"
+                      variant={!customReturn && Number(currentInputs.returnRate) === scenario.rate ? "secondary" : "outline"}
+                      aria-pressed={!customReturn && Number(currentInputs.returnRate) === scenario.rate}
+                      onClick={() => {
+                        setCustomReturn(false);
+                        form.setValue("returnRate", scenario.rate, { shouldDirty: true, shouldValidate: true });
+                      }} className="h-auto min-w-0 flex-col gap-1 py-2">
+                      <span>{scenario.rate}%</span><span className="text-xs font-normal">{scenario.label}</span>
+                    </Button>
+                  ))}
+                  <Button type="button" variant={customReturn ? "secondary" : "outline"} aria-pressed={customReturn}
+                    onClick={() => setCustomReturn(true)} className="h-auto py-2">Custom</Button>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Example annualized returns before inflation. These are scenarios to compare, not predictions for your investments.
+                </p>
+                {(advanced || customReturn) && (
+                  <NumberField form={form} name="returnRate" label="Annual return (%)" step="0.1" onChange={() => setCustomReturn(true)} />
+                )}
+              </fieldset>
+
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <Label htmlFor="today-dollars">Show in today’s dollars</Label>
+                  <Switch id="today-dollars" checked={todayDollars} onCheckedChange={setTodayDollars} />
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {todayDollars ? "Adjusts results for purchasing power" : "Results use future dollars"} with an inflation assumption of {currentInputs.inflationRate}% per year.
+                  {!advanced && " Change this in advanced mode."}
+                </p>
+              </div>
+
+              {advanced && (
+                <div className="space-y-5 rounded-lg border p-4">
+                  <NumberField form={form} name="inflationRate" label="Annual inflation (%)" step="0.1" />
+                  <FormField control={form.control} name="increaseType" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Contribution increase each year</FormLabel>
+                      <FormControl>
+                        <select {...field} className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                          <option value="percent">By percentage</option><option value="amount">By dollar amount</option>
+                        </select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <NumberField form={form} name="increaseValue" label={currentInputs.increaseType === "percent" ? "Annual increase (%)" : "Annual increase ($)"} />
+                  <FormField control={form.control} name="contributionTiming" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Contribution timing</FormLabel>
+                      <FormControl>
+                        <select {...field} className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+                          <option value="start">Start of each year</option><option value="end">End of each year</option>
+                        </select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              )}
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Contributions at the {currentInputs.contributionTiming} of each year.
+                {Number(currentInputs.increaseValue) === 0 ? " No annual increase." : ` Contributions increase by ${currentInputs.increaseType === "amount" ? "$" : ""}${currentInputs.increaseValue}${currentInputs.increaseType === "percent" ? "%" : ""} each year.`}
+                {!advanced && Number(currentInputs.increaseValue) > 0 && " Your advanced settings still apply."}
+              </p>
+              <Button type="submit" size="lg" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">Calculate my future</Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
+
+      <div className="min-w-0 space-y-6 lg:col-span-3" aria-live="polite">
+        {!snapshot && (
+          <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed bg-card p-6 text-center">
+            <AreaChart className="h-12 w-12 text-muted-foreground" />
+            <h2 className="text-xl font-semibold">Explore your future savings</h2>
+            <p className="text-muted-foreground">Calculate to compare return scenarios and see how your contributions grow.</p>
           </div>
         )}
-        {result && (
-          <Card className="shadow-lg animate-in fade-in-50 duration-500">
+        {snapshot && result && (
+          <Card className="shadow-lg">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-6 w-6" />
-                Illustrative Retirement Projection
-              </CardTitle>
-              <CardDescription>
-                At age {form.getValues("retirementAge")}, your savings could be worth:
-              </CardDescription>
+              <CardTitle className="flex items-center gap-2"><TrendingUp className="h-6 w-6" />Your retirement projection</CardTitle>
+              <CardDescription>At age {snapshot.inputs.retirementAge}, under a {snapshot.inputs.returnRate}% annual return assumption</CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-col gap-6">
-                {isProjectedValueTooHigh ? (
-                  <div className="text-center">
-                    <p className="text-5xl font-bold text-primary">&gt; {formatCurrency(MAX_PROJECTION)}</p>
-                    <div className="mt-6 flex flex-col items-center gap-4 rounded-lg border border-amber-500/50 bg-amber-500/10 p-6 text-center">
-                      <AlertTriangle className="h-10 w-10 text-amber-500" />
-                      <h3 className="text-xl font-bold text-amber-600">Off the charts!</h3>
-                      <p className="text-amber-700">
-                        Your projected savings are astronomical. While impressive, these numbers are beyond the scope of this calculator&apos;s detailed breakdown.
-                      </p>
-                    </div>
+            <CardContent className="space-y-6">
+              {inputsChanged && <p role="status" className="rounded-lg border bg-muted p-3 text-sm">Inputs changed. Calculate again to update these results.</p>}
+              <div>
+                <p className="break-words text-3xl font-bold tracking-tight text-primary sm:text-4xl">{projectedAmount(result)}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {todayDollars ? `In today’s dollars, assuming ${snapshot.inputs.inflationRate}% annual inflation` : "In future dollars, before inflation"}
+                </p>
+                {todayDollars && <p className="mt-1 text-sm text-muted-foreground">Equivalent annual return after inflation is {realAnnualReturn(snapshot.inputs.returnRate, snapshot.inputs.inflationRate).toFixed(2)}%</p>}
+              </div>
+              {!result.isCapped && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-background/50 p-4">
+                    <p className="text-sm text-muted-foreground">{todayDollars ? "Contributions in today’s dollars" : "Total contributions"}</p>
+                    <p className="mt-1 text-xl font-semibold">{formatCurrency(result.totalContributions)}</p>
                   </div>
-                ) : (
-                  <>
-                    <p className="text-5xl font-bold text-primary">
-                      {formatCurrency(result.totalProjectedValue)}
-                    </p>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <div className="rounded-lg border bg-background/50 p-4">
-                        <p className="text-sm text-muted-foreground">Total Contributions</p>
-                        <p className="text-xl font-semibold">{formatCurrency(result.totalContributions)}</p>
-                      </div>
-                      <div className="rounded-lg border bg-background/50 p-4">
-                        <p className="text-sm text-muted-foreground">Estimated Investment Growth</p>
-                        <p className="text-xl font-semibold text-primary">{formatCurrency(result.totalInterest)}</p>
-                      </div>
+                  <div className="rounded-lg border bg-background/50 p-4">
+                    <p className="text-sm text-muted-foreground">{todayDollars ? "Investment growth after inflation" : "Estimated investment growth"}</p>
+                    <p className="mt-1 text-xl font-semibold text-primary">{formatCurrency(result.totalInterest)}</p>
+                  </div>
+                </div>
+              )}
+              {result.isCapped && <p className="text-sm text-muted-foreground">This projection exceeds the calculator’s display limit. Detailed totals and chart are hidden.</p>}
+              <section aria-labelledby="comparison-title" className="space-y-3">
+                <h3 id="comparison-title" className="font-semibold">Compare return scenarios</h3>
+                <p className="text-sm text-muted-foreground">Same savings, contributions, and timing. Only the assumed return changes.</p>
+                <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", comparison.length === 3 && "xl:grid-cols-3")}>
+                  {comparison.map(scenario => (
+                    <div key={scenario.rate} className={cn("rounded-lg border p-3", scenario.rate === snapshot.inputs.returnRate && "border-primary bg-primary/5")}>
+                      <p className="text-sm text-muted-foreground">{scenario.label} · {scenario.rate}%</p>
+                      <p className="mt-1 break-words font-semibold">{projectedAmount(scenario.projection)}</p>
+                      {scenario.rate === snapshot.inputs.returnRate && <p className="mt-1 text-xs text-primary">Selected assumption</p>}
                     </div>
-                  </>
-                )}
+                  ))}
+                </div>
+              </section>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <span className="font-semibold text-foreground">Educational use only.</span>{" "}
-                This is a hypothetical estimate, not financial, investment, tax, or legal advice.
-                Actual results may differ.
+                This is a hypothetical estimate, not financial, investment, tax, or legal advice. Actual results may differ.
               </p>
-              <Separator />
-               <div>
-                <h4 className="font-semibold text-lg mb-2">Contribution Breakdown</h4>
-                <p className="text-sm text-muted-foreground mb-4">
-                  This chart shows which contributions make up your final projected savings.
-                </p>
-                <div className="h-[300px] w-full">
-                  <ContributionChart data={result.breakdown} isCapped={isProjectedValueTooHigh} />
-                </div>
-               </div>
-               <section aria-labelledby="projection-assumptions-heading" className="rounded-lg border bg-muted/30 p-4 text-sm">
-                <h4 id="projection-assumptions-heading" className="font-semibold">
-                  Assumptions and limitations
-                </h4>
-                <p className="mt-2 leading-relaxed text-muted-foreground">
-                  The calculator assumes the same annual return every year. It adds each
-                  annual contribution before that year&apos;s growth and increases future
-                  contributions according to your inputs. All amounts are nominal,
-                  meaning they are not adjusted for inflation.
-                </p>
-                <p className="mt-2 leading-relaxed text-muted-foreground">
-                  These projections do not account for taxes, fees, market volatility,
-                  contribution limits, withdrawals, or your full financial situation.
-                  Returns are not guaranteed, and actual results will vary. Consider
-                  consulting a qualified professional before making financial decisions.
-                </p>
-               </section>
+              {!result.isCapped && (
+                <>
+                  <Separator />
+                  <section aria-labelledby="breakdown-title">
+                    <h3 id="breakdown-title" className="font-semibold">Contribution breakdown</h3>
+                    <p className="mb-4 mt-2 text-sm text-muted-foreground">Each bar shows how much a deposit contributes to the final balance{todayDollars ? " in today’s dollars" : " in future dollars"}.</p>
+                    <div className="h-[300px] w-full"><ContributionChart data={result.breakdown} todayDollars={todayDollars} /></div>
+                  </section>
+                </>
+              )}
+              <section aria-labelledby="assumptions-title" className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed text-muted-foreground">
+                <h3 id="assumptions-title" className="font-semibold text-foreground">Assumptions and limitations</h3>
+                <p>The model applies the same annualized return every year. Contributions are added at the {snapshot.inputs.contributionTiming} of each year and grow according to your inputs.</p>
+                <p>{todayDollars
+                  ? "Balances are adjusted for inflation at retirement. Contributions are adjusted when they are paid, so growth shows the change in purchasing power."
+                  : "Future-dollar amounts do not account for inflation. Switch to today’s dollars to compare purchasing power."}</p>
+                <p>The 5%, 7%, and 9% presets are illustrative scenarios. The 7% example is also used in <a href="https://www.investor.gov/introduction-investing" target="_blank" rel="noreferrer" className="underline underline-offset-2">Investor.gov’s investing guide</a>. These rates are not forecasts for any fund or portfolio.</p>
+                <p>Taxes, fees, market volatility, contribution limits, and withdrawals are not modeled. Returns are not guaranteed.</p>
+              </section>
             </CardContent>
           </Card>
         )}

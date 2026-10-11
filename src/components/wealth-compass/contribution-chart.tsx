@@ -7,13 +7,14 @@ import {
   ChartContainer,
   ChartTooltip,
 } from "@/components/ui/chart"
-import type { CalculationResult } from "./calculator"
+import type { CalculationResult } from "@/lib/retirement-calculator"
 import { formatCurrency } from "@/lib/utils";
 import { MAX_PROJECTION } from "@/lib/retirement-calculator";
 
 interface ContributionChartProps {
   data: CalculationResult["breakdown"]
   isCapped?: boolean;
+  todayDollars?: boolean;
 }
 
 const chartConfig = {
@@ -23,7 +24,7 @@ const chartConfig = {
   },
 }
 
-export function ContributionChart({ data, isCapped }: ContributionChartProps) {
+export function ContributionChart({ data, isCapped, todayDollars }: ContributionChartProps) {
   const chartData = data.map(item => ({
     ...item,
     name: item.name === "Initial Savings" ? "Initial" : item.name.replace("Year ", "Y")
@@ -77,9 +78,10 @@ export function ContributionChart({ data, isCapped }: ContributionChartProps) {
               return (
                 <div className="min-w-[150px] rounded-lg border bg-background p-2 text-sm shadow-md">
                   <p className="font-bold">{isInitial ? "Initial Savings" : `Contribution at Age ${age}`}</p>
-                  {!isInitial && <p>Contribution: {formatCurrency(contribution as number)}</p>}
-                  <p>Future Value: {isCapped && value >= MAX_PROJECTION ? `> ${formatCurrency(MAX_PROJECTION)}` : formatCurrency(value as number)}</p>
-                  {!isCapped && <p>Share: {(percentage as number).toFixed(2)}%</p>}
+                  <p>Deposit {formatCurrency(contribution as number)}</p>
+                  <p>Final value {isCapped && value >= MAX_PROJECTION ? `> ${formatCurrency(MAX_PROJECTION)}` : formatCurrency(value as number)}</p>
+                  {!isCapped && <p>Share {(percentage as number).toFixed(2)}%</p>}
+                  <p className="mt-1 text-muted-foreground">{todayDollars ? "In today’s dollars" : "In future dollars"}</p>
                 </div>
               );
             }

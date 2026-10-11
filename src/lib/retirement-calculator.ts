@@ -1,84 +1,117 @@
-import { FormValues, CalculationResult, BreakdownItem } from "@/components/wealth-compass/calculator";
+export const MAX_PROJECTION = 100_000_000_000_000;
 
-export const MAX_PROJECTION = 100_000_000_000_000; // 100 Trillion
+export const RETURN_SCENARIOS = [
+  { label: "Lower", rate: 5 },
+  { label: "Middle", rate: 7 },
+  { label: "Higher", rate: 9 },
+] as const;
 
-export function calculateRetirementSavings(values: FormValues): CalculationResult {
-  const {
-    currentAge,
-    retirementAge,
-    currentSavings,
-    annualContribution,
-    returnRate,
-    increaseType,
-    increaseValue,
-  } = values;
-  const yearsToRetire = retirementAge - currentAge;
-  const rate = returnRate / 100;
+export type CalculationInputs = {
+  currentAge: number;
+  retirementAge: number;
+  currentSavings: number;
+  annualContribution: number;
+  returnRate: number;
+  increaseType: "percent" | "amount";
+  increaseValue: number;
+  inflationRate: number;
+  contributionTiming: "start" | "end";
+};
 
-  let futureValue = currentSavings;
-  let totalAnnualContributions = 0;
-  let currentContribution = annualContribution;
-  const breakdown: BreakdownItem[] = [];
+export type BreakdownItem = {
+  name: string;
+  value: number;
+  percentage: number;
+  age: number;
+  contribution: number;
+  depositYear: number;
+};
 
-  // FV of initial savings
-  let fvOfCurrentSavings = currentSavings * Math.pow(1 + rate, yearsToRetire);
-  if (fvOfCurrentSavings > MAX_PROJECTION) fvOfCurrentSavings = MAX_PROJECTION;
-  
-  breakdown.push({
+export type CalculationResult = {
+  totalProjectedValue: number;
+  totalContributions: number;
+  totalInterest: number;
+  breakdown: BreakdownItem[];
+  balances: { age: number; year: number; value: number }[];
+  isCapped: boolean;
+};
+
+export function calculateRetirementSavings(values: CalculationInputs): CalculationResult {
+  const years = values.retirementAge - values.currentAge;
+  const growth = 1 + values.returnRate / 100;
+  let balance = values.currentSavings;
+  let contribution = values.annualContribution;
+  let totalContributions = values.currentSavings;
+
+  const breakdown: BreakdownItem[] = [{
     name: "Initial Savings",
-    value: fvOfCurrentSavings,
-    percentage: 0, // will calculate at the end
-    age: currentAge,
-    contribution: currentSavings
-  });
-  futureValue = fvOfCurrentSavings;
+    value: values.currentSavings * growth ** years,
+    percentage: 0,
+    age: values.currentAge,
+    contribution: values.currentSavings,
+    depositYear: 0,
+  }];
+  const balances = [{ age: values.currentAge, year: 0, value: balance }];
 
-  let yearEndFutureValue = currentSavings;
-
-  for (let i = 1; i <= yearsToRetire; i++) {
-    const futureValueWithContribution = yearEndFutureValue + currentContribution;
-    if (futureValueWithContribution > MAX_PROJECTION * 2) { // Allow some headroom before capping
-      yearEndFutureValue = MAX_PROJECTION * 2;
-    } else {
-      yearEndFutureValue = futureValueWithContribution * (1 + rate);
-    }
-    
-    let fvOfThisContribution = currentContribution * Math.pow(1 + rate, yearsToRetire - i + 1);
-    if (fvOfThisContribution > MAX_PROJECTION) fvOfThisContribution = MAX_PROJECTION;
-
+  for (let year = 1; year <= years; year++) {
+    const atStart = values.contributionTiming === "start";
+    balance = atStart ? (balance + contribution) * growth : balance * growth + contribution;
+    const depositYear = atStart ? year - 1 : year;
     breakdown.push({
-      name: `Year ${i}`,
-      value: fvOfThisContribution,
-      percentage: 0, // will calculate at the end
-      age: currentAge + i,
-      contribution: currentContribution,
+      name: `Year ${year}`,
+      value: contribution * growth ** (years - depositYear),
+      percentage: 0,
+      age: values.currentAge + depositYear,
+      contribution,
+      depositYear,
     });
-
-    totalAnnualContributions += currentContribution;
-    
-    if (increaseType === 'percent') {
-      currentContribution *= (1 + (increaseValue / 100));
-    } else {
-      currentContribution += increaseValue;
-    }
+    balances.push({ age: values.currentAge + year, year, value: balance });
+    totalContributions += contribution;
+    contribution = values.increaseType === "percent"
+      ? contribution * (1 + values.increaseValue / 100)
+      : contribution + values.increaseValue;
   }
 
-  const totalProjectedValue = yearEndFutureValue > MAX_PROJECTION ? MAX_PROJECTION : yearEndFutureValue;
-
-  // Now calculate percentages
-  if (totalProjectedValue < MAX_PROJECTION) {
-    breakdown.forEach(item => {
-      item.percentage = (item.value / totalProjectedValue) * 100;
-    });
+  // Keep raw values for inflation conversion. The UI applies the display cap.
+  // The form's bounds ensure calculations remain finite.
+  for (const item of breakdown) {
+    item.percentage = balance > 0 ? item.value / balance * 100 : 0;
   }
-  
-  const totalContributions = currentSavings + totalAnnualContributions;
-  const totalInterest = totalProjectedValue - totalContributions;
+  return {
+    totalProjectedValue: balance,
+    totalContributions,
+    totalInterest: balance - totalContributions,
+    breakdown,
+    balances,
+    isCapped: balance >= MAX_PROJECTION,
+  };
+}
 
+export function realAnnualReturn(returnRate: number, inflationRate: number): number {
+  return ((1 + returnRate / 100) / (1 + inflationRate / 100) - 1) * 100;
+}
+
+export function projectionInTodaysDollars(
+  projection: CalculationResult,
+  inputs: CalculationInputs,
+): CalculationResult {
+  const inflation = 1 + inputs.inflationRate / 100;
+  const horizon = inputs.retirementAge - inputs.currentAge;
+  const terminalDeflator = inflation ** horizon;
+  const breakdown = projection.breakdown.map(item => ({
+    ...item,
+    value: item.value / terminalDeflator,
+    // Discount deposits when paid so the contribution and growth totals are consistent.
+    contribution: item.contribution / inflation ** item.depositYear,
+  }));
+  const totalProjectedValue = projection.totalProjectedValue / terminalDeflator;
+  const totalContributions = breakdown.reduce((sum, item) => sum + item.contribution, 0);
   return {
     totalProjectedValue,
     totalContributions,
-    totalInterest,
+    totalInterest: totalProjectedValue - totalContributions,
     breakdown,
+    balances: projection.balances.map(item => ({ ...item, value: item.value / inflation ** item.year })),
+    isCapped: totalProjectedValue >= MAX_PROJECTION,
   };
 }
