@@ -86,10 +86,12 @@ export function Calculator() {
           <CardDescription>Start with a few assumptions and explore what changes.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div role="group" aria-label="Calculator mode" className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+          <div role="group" aria-label="Calculator mode" className="relative mb-6 grid grid-cols-2 rounded-lg bg-muted p-1">
+            <span aria-hidden="true"
+              className={`pointer-events-none absolute bottom-1 left-1 top-1 w-[calc(50%-0.25rem)] rounded-md bg-primary shadow-sm transition-transform duration-300 ease-in-out motion-reduce:transition-none ${advanced ? "translate-x-full" : "translate-x-0"}`} />
             {[false, true].map(isAdvanced => (
-              <Button key={String(isAdvanced)} type="button" variant={advanced === isAdvanced ? "default" : "ghost"}
-                className={advanced === isAdvanced ? "shadow-sm" : "text-muted-foreground"}
+              <Button key={String(isAdvanced)} type="button" variant="ghost"
+                className={`relative z-10 hover:bg-transparent duration-200 motion-reduce:transition-none ${advanced === isAdvanced ? "text-primary-foreground hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
                 aria-pressed={advanced === isAdvanced} onClick={() => setAdvanced(isAdvanced)}>
                 {isAdvanced ? "Advanced" : "Basic"}
               </Button>
