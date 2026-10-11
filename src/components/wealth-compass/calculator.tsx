@@ -137,7 +137,7 @@ export function Calculator() {
                   <Switch id="today-dollars" checked={todayDollars} onCheckedChange={setTodayDollars} />
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  {todayDollars ? "Adjusts results for purchasing power" : "Results use future dollars"} with an inflation assumption of {currentInputs.inflationRate}% per year.
+                  Adjusts results for inflation using {currentInputs.inflationRate}% per year.
                   {!advanced && " Change this in advanced mode."}
                 </p>
               </div>
