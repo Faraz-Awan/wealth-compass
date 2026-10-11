@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type UseFormReturn } from "react-hook-form";
-import { AreaChart, Calculator as CalculatorIcon, Check, TrendingUp } from "lucide-react";
+import { AreaChart, Calculator as CalculatorIcon, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -91,7 +91,6 @@ export function Calculator() {
               <Button key={String(isAdvanced)} type="button" variant={advanced === isAdvanced ? "default" : "ghost"}
                 className={advanced === isAdvanced ? "shadow-sm" : "text-muted-foreground"}
                 aria-pressed={advanced === isAdvanced} onClick={() => setAdvanced(isAdvanced)}>
-                <Check aria-hidden="true" className={advanced === isAdvanced ? "visible" : "invisible"} />
                 {isAdvanced ? "Advanced" : "Basic"}
               </Button>
             ))}
