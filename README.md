@@ -10,7 +10,6 @@ This project is an educational planning tool, not financial advice. Its projecti
 
 - Project a retirement balance from a configurable set of assumptions
 - Start in basic mode with illustrative 5%, 7%, and 9% returns or enter a custom rate
-- Compare return scenarios using the same contributions and timing
 - Switch to advanced mode without losing any inputs
 - Adjust inflation, contribution increases, and start/end-of-year deposits
 - Show results and the contribution chart in future dollars or today's purchasing power

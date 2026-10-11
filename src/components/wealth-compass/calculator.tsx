@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, type UseFormReturn } from "react-hook-form";
-import { AreaChart, Calculator as CalculatorIcon, TrendingUp } from "lucide-react";
+import { AreaChart, Calculator as CalculatorIcon, Check, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ContributionChart } from "./contribution-chart";
-import { cn, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { calculatorSchema, type FormValues } from "@/lib/calculator-schema";
 import {
   calculateRetirementSavings,
@@ -73,16 +73,6 @@ export function Calculator() {
   const result = snapshot && (todayDollars
     ? projectionInTodaysDollars(snapshot.projection, snapshot.inputs)
     : snapshot.projection);
-  const comparison = snapshot ? [
-    ...RETURN_SCENARIOS,
-    ...(!RETURN_SCENARIOS.some(scenario => scenario.rate === snapshot.inputs.returnRate)
-      ? [{ label: "Custom", rate: snapshot.inputs.returnRate }]
-      : []),
-  ].map(scenario => {
-    const inputs = { ...snapshot.inputs, returnRate: scenario.rate };
-    const nominal = calculateRetirementSavings(inputs);
-    return { ...scenario, projection: todayDollars ? projectionInTodaysDollars(nominal, inputs) : nominal };
-  }) : [];
 
   function onSubmit(inputs: FormValues) {
     setSnapshot({ inputs, projection: calculateRetirementSavings(inputs) });
@@ -98,8 +88,10 @@ export function Calculator() {
         <CardContent>
           <div role="group" aria-label="Calculator mode" className="mb-6 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
             {[false, true].map(isAdvanced => (
-              <Button key={String(isAdvanced)} type="button" variant={advanced === isAdvanced ? "secondary" : "ghost"}
+              <Button key={String(isAdvanced)} type="button" variant={advanced === isAdvanced ? "default" : "ghost"}
+                className={advanced === isAdvanced ? "shadow-sm" : "text-muted-foreground"}
                 aria-pressed={advanced === isAdvanced} onClick={() => setAdvanced(isAdvanced)}>
+                <Check aria-hidden="true" className={advanced === isAdvanced ? "visible" : "invisible"} />
                 {isAdvanced ? "Advanced" : "Basic"}
               </Button>
             ))}
@@ -118,7 +110,7 @@ export function Calculator() {
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {RETURN_SCENARIOS.map(scenario => (
                     <Button key={scenario.rate} type="button"
-                      variant={!customReturn && Number(currentInputs.returnRate) === scenario.rate ? "secondary" : "outline"}
+                      variant={!customReturn && Number(currentInputs.returnRate) === scenario.rate ? "default" : "outline"}
                       aria-pressed={!customReturn && Number(currentInputs.returnRate) === scenario.rate}
                       onClick={() => {
                         setCustomReturn(false);
@@ -127,11 +119,11 @@ export function Calculator() {
                       <span>{scenario.rate}%</span><span className="text-xs font-normal">{scenario.label}</span>
                     </Button>
                   ))}
-                  <Button type="button" variant={customReturn ? "secondary" : "outline"} aria-pressed={customReturn}
+                  <Button type="button" variant={customReturn ? "default" : "outline"} aria-pressed={customReturn}
                     onClick={() => setCustomReturn(true)} className="h-auto py-2">Custom</Button>
                 </div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Example annualized returns before inflation. These are scenarios to compare, not predictions for your investments.
+                  Example annualized returns before inflation, not predictions for your investments.
                 </p>
                 {(advanced || customReturn) && (
                   <NumberField form={form} name="returnRate" label="Annual return (%)" step="0.1" onChange={() => setCustomReturn(true)} />
@@ -193,7 +185,7 @@ export function Calculator() {
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 rounded-lg border border-dashed bg-card p-6 text-center">
             <AreaChart className="h-12 w-12 text-muted-foreground" />
             <h2 className="text-xl font-semibold">Explore your future savings</h2>
-            <p className="text-muted-foreground">Calculate to compare return scenarios and see how your contributions grow.</p>
+            <p className="text-muted-foreground">Calculate to see how your savings and contributions could grow.</p>
           </div>
         )}
         {snapshot && result && (
@@ -224,19 +216,6 @@ export function Calculator() {
                 </div>
               )}
               {result.isCapped && <p className="text-sm text-muted-foreground">This projection exceeds the calculator’s display limit. Detailed totals and chart are hidden.</p>}
-              <section aria-labelledby="comparison-title" className="space-y-3">
-                <h3 id="comparison-title" className="font-semibold">Compare return scenarios</h3>
-                <p className="text-sm text-muted-foreground">Same savings, contributions, and timing. Only the assumed return changes.</p>
-                <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", comparison.length === 3 && "xl:grid-cols-3")}>
-                  {comparison.map(scenario => (
-                    <div key={scenario.rate} className={cn("rounded-lg border p-3", scenario.rate === snapshot.inputs.returnRate && "border-primary bg-primary/5")}>
-                      <p className="text-sm text-muted-foreground">{scenario.label} · {scenario.rate}%</p>
-                      <p className="mt-1 break-words font-semibold">{projectedAmount(scenario.projection)}</p>
-                      {scenario.rate === snapshot.inputs.returnRate && <p className="mt-1 text-xs text-primary">Selected assumption</p>}
-                    </div>
-                  ))}
-                </div>
-              </section>
               <p className="text-sm leading-relaxed text-muted-foreground">
                 <span className="font-semibold text-foreground">Educational use only.</span>{" "}
                 This is a hypothetical estimate, not financial, investment, tax, or legal advice. Actual results may differ.
